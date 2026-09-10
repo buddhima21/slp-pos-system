@@ -1,0 +1,6 @@
+# SLP POS runtime uses only the Python standard library
+# (tkinter, sqlite3, hashlib, csv, shutil).
+#
+# Development / build tooling only:
+pytest>=8.0
+pyinstaller>=6.0

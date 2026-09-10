@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+
+# Runtime data (never commit the live database or backups)
+data_store/
+backups/
+*.db
+*.db-wal
+*.db-shm
+
+# Editor
+.vscode/
+.idea/
