@@ -91,6 +91,40 @@ def test_change_due_non_numeric_rejected(conn):
         checkout_service.change_due(100.0, "abc")
 
 
+def test_evaluate_tender_ok():
+    result = checkout_service.evaluate_tender(260.0, "500")
+    assert result.ok is True
+    assert result.change == 240.0
+    assert result.shortfall == 0.0
+
+
+def test_evaluate_tender_short():
+    result = checkout_service.evaluate_tender(260.0, "200")
+    assert result.ok is False
+    assert result.shortfall == 60.0
+    assert result.change == 0.0
+
+
+def test_evaluate_tender_invalid():
+    result = checkout_service.evaluate_tender(260.0, "")
+    assert result.ok is False
+    assert result.tendered is None
+
+
+def test_evaluate_tender_penny_change():
+    # 3 x 33.33 = 99.99; hand over 100.00
+    result = checkout_service.evaluate_tender(99.99, "100")
+    assert result.ok is True
+    assert result.change == 0.01
+
+
+def test_normalize_payment_method():
+    assert checkout_service.normalize_payment_method("Cash") == "cash"
+    assert checkout_service.normalize_payment_method("  CASH  ") == "cash"
+    with pytest.raises(CheckoutError, match="Unsupported payment method"):
+        checkout_service.normalize_payment_method("card")
+
+
 # --- complete_sale: SRS 9.1 scenarios -----------------------------------
 
 
@@ -176,6 +210,38 @@ def test_failed_sale_records_nothing(conn):
     assert sales_repo.count_sales(conn) == 0
     assert products_repo.get_by_id(conn, a.id).stock_qty == 10
     assert products_repo.get_by_id(conn, b.id).stock_qty == 1
+
+
+def test_payment_method_stored_lowercased(conn):
+    cola = _product(conn, barcode="1", name="Cola", price=120.0, stock=10)
+    cart = Cart()
+    cart.add_product(cola, 1)
+    sale = checkout_service.complete_sale(
+        conn, cart, cashier_id=CASHIER_ID, amount_tendered="120", payment_method="Cash"
+    )
+    assert sale.payment_method == "cash"
+    assert sales_repo.get_sale(conn, sale.sale_id).payment_method == "cash"
+
+
+def test_complete_sale_defaults_to_cash(conn):
+    cola = _product(conn, barcode="1", name="Cola", price=120.0, stock=10)
+    cart = Cart()
+    cart.add_product(cola, 1)
+    sale = checkout_service.complete_sale(
+        conn, cart, cashier_id=CASHIER_ID, amount_tendered="120"
+    )
+    assert sale.payment_method == "cash"
+
+
+def test_complete_sale_rejects_unsupported_method(conn):
+    cola = _product(conn, barcode="1", name="Cola", price=120.0, stock=10)
+    cart = Cart()
+    cart.add_product(cola, 1)
+    with pytest.raises(CheckoutError, match="Unsupported payment method"):
+        checkout_service.complete_sale(
+            conn, cart, cashier_id=CASHIER_ID, amount_tendered="120", payment_method="card"
+        )
+    assert sales_repo.count_sales(conn) == 0
 
 
 def test_unit_price_captured_at_sale_time(conn):

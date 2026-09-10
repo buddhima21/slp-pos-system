@@ -130,23 +130,60 @@ class CheckoutScreen(ttk.Frame):
         self._total_label.grid(row=0, column=0, sticky="w")
         ttk.Label(right, text="Total due").grid(row=1, column=0, sticky="w", pady=(0, 16))
 
-        ttk.Label(right, text="Cash tendered").grid(row=2, column=0, sticky="w")
+        method_row = ttk.Frame(right)
+        method_row.grid(row=2, column=0, sticky="w", pady=(0, 10))
+        ttk.Label(method_row, text="Method:").pack(side="left")
+        self._method_var = tk.StringVar(value="Cash")
+        # Read-only, single option for v1.0; add card/mobile here later (FR-4.2).
+        self._method_combo = ttk.Combobox(
+            method_row,
+            textvariable=self._method_var,
+            values=["Cash"],
+            state="readonly",
+            width=10,
+        )
+        self._method_combo.pack(side="left", padx=6)
+
+        ttk.Label(right, text="Cash tendered").grid(row=3, column=0, sticky="w")
         self._tendered_var = tk.StringVar()
-        tendered_entry = ttk.Entry(
+        self._tendered_entry = ttk.Entry(
             right, textvariable=self._tendered_var, font=("Segoe UI", 14), width=16
         )
-        tendered_entry.grid(row=3, column=0, sticky="w", pady=(2, 12))
-        tendered_entry.bind("<KeyRelease>", lambda _e: self._update_change())
-        tendered_entry.bind("<Return>", lambda _e: self._complete_sale())
+        self._tendered_entry.grid(row=4, column=0, sticky="w", pady=(2, 8))
+        self._tendered_entry.bind("<KeyRelease>", lambda _e: self._update_change())
+        self._tendered_entry.bind("<Return>", lambda _e: self._complete_sale())
 
-        self._change_label = ttk.Label(right, text="Change: -", font=("Segoe UI", 16))
-        self._change_label.grid(row=4, column=0, sticky="w", pady=(0, 20))
+        self._build_quick_cash(right, row=5)
+
+        self._change_label = ttk.Label(
+            right, text="Change: -", font=("Segoe UI", 18, "bold")
+        )
+        self._change_label.grid(row=6, column=0, sticky="w", pady=(14, 20))
 
         self._complete_btn = ttk.Button(
             right, text="Complete sale  (F12)", command=self._complete_sale
         )
-        self._complete_btn.grid(row=5, column=0, sticky="ew", ipady=8)
+        self._complete_btn.grid(row=7, column=0, sticky="ew", ipady=8)
         self.winfo_toplevel().bind("<F12>", lambda _e: self._complete_sale())
+
+    def _build_quick_cash(self, parent: tk.Misc, row: int) -> None:
+        grid = ttk.Frame(parent)
+        grid.grid(row=row, column=0, sticky="w", pady=(2, 0))
+
+        ttk.Button(grid, text="Exact", width=7, command=self._tender_exact).grid(
+            row=0, column=0, padx=2, pady=2
+        )
+        ttk.Button(grid, text="Clear", width=7, command=self._tender_clear).grid(
+            row=0, column=1, padx=2, pady=2
+        )
+        for i, note in enumerate(config.CASH_DENOMINATIONS):
+            r, c = divmod(i, 3)
+            ttk.Button(
+                grid,
+                text=f"+{note:,}",
+                width=7,
+                command=lambda n=note: self._tender_add(n),
+            ).grid(row=r + 1, column=c, padx=2, pady=2)
 
     # --- scanner input ------------------------------------------------
 
@@ -298,12 +335,35 @@ class CheckoutScreen(ttk.Frame):
         if not raw:
             self._change_label.config(text="Change: -", foreground="black")
             return
-        try:
-            change = checkout_service.change_due(self._cart.total, raw)
-        except CheckoutError as exc:
-            self._change_label.config(text=str(exc), foreground="#b00000")
-            return
-        self._change_label.config(text=f"Change: {_money(change)}", foreground="#0a7a0a")
+        result = checkout_service.evaluate_tender(self._cart.total, raw)
+        if result.tendered is None:
+            self._change_label.config(text="Enter a cash amount", foreground="#b00000")
+        elif not result.ok:
+            self._change_label.config(
+                text=f"Short by {_money(result.shortfall)}", foreground="#b00000"
+            )
+        else:
+            self._change_label.config(
+                text=f"Change: {_money(result.change)}", foreground="#0a7a0a"
+            )
+
+    # --- quick cash --------------------------------------------------
+
+    def _current_tender(self) -> float:
+        result = checkout_service.evaluate_tender(self._cart.total, self._tendered_var.get())
+        return result.tendered or 0.0
+
+    def _tender_add(self, amount: int) -> None:
+        self._tendered_var.set(f"{self._current_tender() + amount:.2f}")
+        self._update_change()
+
+    def _tender_exact(self) -> None:
+        self._tendered_var.set(f"{self._cart.total:.2f}")
+        self._update_change()
+
+    def _tender_clear(self) -> None:
+        self._tendered_var.set("")
+        self._update_change()
 
     def _clear_results(self) -> None:
         self._results_tree.delete(*self._results_tree.get_children())
@@ -321,16 +381,18 @@ class CheckoutScreen(ttk.Frame):
                     self._cart,
                     cashier_id=self._cashier_id,
                     amount_tendered=self._tendered_var.get(),
+                    payment_method=self._method_var.get(),
                 )
         except CheckoutError as exc:
             messagebox.showerror("Sale not completed", str(exc), parent=self)
+            self._tendered_entry.focus_set()
             return
 
         messagebox.showinfo(
             "Sale complete",
             f"Sale #{sale.sale_id}\n"
             f"Total: {_money(sale.total)}\n"
-            f"Tendered: {_money(sale.amount_tendered)}\n"
+            f"Paid: {_money(sale.amount_tendered)} ({sale.payment_method})\n"
             f"Change: {_money(sale.change_given)}\n\n"
             "(Receipt printing is added in Phase 7.)",
             parent=self,

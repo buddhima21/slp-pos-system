@@ -13,6 +13,9 @@ from pathlib import Path
 STORE_NAME = "SLP Supermarket"
 CURRENCY_SYMBOL = "Rs. "  # shown on screens and receipts
 
+# Quick-tender buttons on the checkout payment panel (largest first is fine).
+CASH_DENOMINATIONS = (50, 100, 500, 1000, 5000)
+
 # Default credentials created on first run. Must be changed before go-live.
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin123"

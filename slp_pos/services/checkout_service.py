@@ -22,6 +22,10 @@ from slp_pos.services.parsing import parse_money
 
 PAYMENT_CASH = "cash"
 
+# v1.0 accepts cash only. The column and this tuple are the single place to add
+# card / mobile later (SRS FR-4.2, 10.3).
+SUPPORTED_PAYMENT_METHODS: tuple[str, ...] = (PAYMENT_CASH,)
+
 
 class CheckoutError(Exception):
     """A sale could not be built or completed. Message is shown to the cashier."""
@@ -149,14 +153,50 @@ def add_by_barcode(
     return cart.add_product(product, quantity)
 
 
+@dataclass(frozen=True)
+class TenderResult:
+    """Outcome of checking a cash amount against the sale total (SRS FR-4.1)."""
+
+    ok: bool
+    tendered: float | None  # parsed amount, or None if it was not a number
+    change: float           # >= 0 when ok
+    shortfall: float        # > 0 when the tender does not cover the total
+    message: str            # reason, when not ok
+
+
+def evaluate_tender(total: float, amount_tendered: object) -> TenderResult:
+    """Work out change or shortfall for a tender without raising."""
+    try:
+        tendered = parse_money(amount_tendered, "Amount tendered")
+    except ValueError as exc:
+        return TenderResult(False, None, 0.0, 0.0, str(exc))
+    if tendered + 1e-9 < total:
+        return TenderResult(
+            ok=False,
+            tendered=tendered,
+            change=0.0,
+            shortfall=round(total - tendered, 2),
+            message=(
+                f"Amount tendered ({tendered:.2f}) is less than the total ({total:.2f})."
+            ),
+        )
+    return TenderResult(True, tendered, round(tendered - total, 2), 0.0, "")
+
+
 def change_due(total: float, amount_tendered: object) -> float:
     """Change for a given tender, or raise if it does not cover the total."""
-    tendered = parse_money(amount_tendered, "Amount tendered")
-    if tendered + 1e-9 < total:
-        raise CheckoutError(
-            f"Amount tendered ({tendered:.2f}) is less than the total ({total:.2f})."
-        )
-    return round(tendered - total, 2)
+    result = evaluate_tender(total, amount_tendered)
+    if not result.ok:
+        raise CheckoutError(result.message)
+    return result.change
+
+
+def normalize_payment_method(payment_method: str) -> str:
+    """Lower-case and validate a payment method against what v1.0 supports."""
+    method = (payment_method or "").strip().lower()
+    if method not in SUPPORTED_PAYMENT_METHODS:
+        raise CheckoutError(f"Unsupported payment method: {payment_method!r}.")
+    return method
 
 
 def complete_sale(
@@ -172,16 +212,13 @@ def complete_sale(
     if cart.is_empty:
         raise CheckoutError("Add at least one item before completing the sale.")
 
+    method = normalize_payment_method(payment_method)
     total = cart.total
-    try:
-        tendered = parse_money(amount_tendered, "Amount tendered")
-    except ValueError as exc:
-        raise CheckoutError(str(exc))
-    if tendered + 1e-9 < total:
-        raise CheckoutError(
-            f"Amount tendered ({tendered:.2f}) is less than the total ({total:.2f})."
-        )
-    change = round(tendered - total, 2)
+    tender = evaluate_tender(total, amount_tendered)
+    if not tender.ok:
+        raise CheckoutError(tender.message)
+    tendered = tender.tendered
+    change = tender.change
 
     # Authoritative stock re-check against current data, inside the transaction.
     shortages: list[str] = []
@@ -203,7 +240,7 @@ def complete_sale(
         sale_datetime=when,
         cashier_id=cashier_id,
         total_amount=total,
-        payment_method=payment_method,
+        payment_method=method,
         amount_tendered=tendered,
         change_given=change,
     )
@@ -222,7 +259,7 @@ def complete_sale(
         sale_id=sale_id,
         sale_datetime=when,
         cashier_id=cashier_id,
-        payment_method=payment_method,
+        payment_method=method,
         total=total,
         amount_tendered=tendered,
         change_given=change,

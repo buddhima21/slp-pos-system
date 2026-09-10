@@ -58,7 +58,7 @@ Following the SRS development plan (Section 8):
 - [x] Phase 3 — Inventory screen (add / edit / search, low-stock highlight)
 - [x] Phase 4 — Checkout screen (typed search, cart, cash + change, atomic sale)
 - [x] Phase 5 — Barcode scanner (wedge input, focus capture, unknown-code alert)
-- [ ] Phase 6 — Payment & change
+- [x] Phase 6 — Payment & change (quick-cash buttons, live change/shortfall)
 - [ ] Phase 7 — Receipt printing
 - [ ] Phase 8 — Login/roles, reports, low-stock, backup
 - [ ] Phase 9 — PyInstaller packaging
