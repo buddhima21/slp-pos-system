@@ -56,7 +56,7 @@ Following the SRS development plan (Section 8):
 - [x] Phase 1 — Environment & skeleton
 - [x] Phase 2 — SQLite schema + migration
 - [x] Phase 3 — Inventory screen (add / edit / search, low-stock highlight)
-- [ ] Phase 4 — Checkout screen (typed search)
+- [x] Phase 4 — Checkout screen (typed search, cart, cash + change, atomic sale)
 - [ ] Phase 5 — Barcode scanner
 - [ ] Phase 6 — Payment & change
 - [ ] Phase 7 — Receipt printing
