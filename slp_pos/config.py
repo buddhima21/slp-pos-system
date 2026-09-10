@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 STORE_NAME = "SLP Supermarket"
+CURRENCY_SYMBOL = "Rs. "  # shown on screens and receipts
 
 # Default credentials created on first run. Must be changed before go-live.
 DEFAULT_ADMIN_USERNAME = "admin"
