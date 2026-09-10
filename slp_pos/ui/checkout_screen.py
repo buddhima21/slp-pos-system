@@ -1,9 +1,11 @@
 """Checkout screen (SRS 6.3) - the cashier's only screen.
 
-Barcode-first workflow: the search box holds focus, the cashier types a name or
-barcode and presses Enter. An exact barcode match is added straight to the sale;
-otherwise the matches are listed to pick from. The running total is always
-visible; entering the cash tendered shows the change due live.
+Barcode-first workflow: the search box holds focus, the cashier scans an item or
+types a name and presses Enter. An exact barcode match is added straight to the
+sale; otherwise the matches are listed to pick from. Because a USB scanner is
+just a fast keyboard (SRS FR-3.1), typing anywhere on this screen is redirected
+into the search box so a scan is never lost. An unknown barcode shows a clear
+message and beeps rather than failing silently (SRS FR-3.2).
 
 No SQL here. Lookups and ``complete_sale`` run inside ``transaction``.
 """
@@ -16,6 +18,7 @@ from tkinter import messagebox, ttk
 from slp_pos import config
 from slp_pos.data import products_repo
 from slp_pos.db.connection import transaction
+from slp_pos.hardware.scanner import looks_like_barcode, normalize_scan
 from slp_pos.services import checkout_service
 from slp_pos.services.checkout_service import Cart, CheckoutError
 
@@ -40,6 +43,7 @@ class CheckoutScreen(ttk.Frame):
         self._build_cart()
         self._build_payment()
         self._refresh_cart()
+        self._install_scan_capture()
         self.after(100, lambda: self._search_entry.focus_set())
 
     # --- construction ----------------------------------------------------
@@ -53,6 +57,7 @@ class CheckoutScreen(ttk.Frame):
         self._search_entry = ttk.Entry(bar, textvariable=self._search_var, width=36)
         self._search_entry.pack(side="left", padx=6)
         self._search_entry.bind("<Return>", self._on_search_enter)
+        self._search_entry.bind("<KP_Enter>", self._on_search_enter)  # numpad Enter
 
         ttk.Button(bar, text="Search", command=self._run_search).pack(side="left")
 
@@ -143,24 +148,55 @@ class CheckoutScreen(ttk.Frame):
         self._complete_btn.grid(row=5, column=0, sticky="ew", ipady=8)
         self.winfo_toplevel().bind("<F12>", lambda _e: self._complete_sale())
 
+    # --- scanner input ------------------------------------------------
+
+    def _install_scan_capture(self) -> None:
+        """Redirect stray keystrokes into the search box.
+
+        A wedge scanner types wherever focus happens to be. If the cashier last
+        clicked the cart or a button, the next scan would be lost - so any
+        printable key pressed while focus is not in a text field is sent to the
+        search box instead.
+        """
+        self.winfo_toplevel().bind("<Key>", self._maybe_capture_scan, add="+")
+
+    def _maybe_capture_scan(self, event: tk.Event) -> str | None:
+        if not self.winfo_ismapped():  # Checkout is not the visible tab
+            return None
+        if event.state & 0x0004:  # Ctrl held -> a shortcut, not a scan
+            return None
+        char = event.char
+        if not char or not char.isprintable():
+            return None
+        focused = self.focus_get()
+        if isinstance(focused, (ttk.Entry, tk.Entry, ttk.Spinbox, tk.Spinbox)):
+            return None  # cashier is already typing in a field
+        self._search_entry.focus_set()
+        self._search_entry.insert("end", char)
+        return "break"
+
     # --- search / add --------------------------------------------------
 
-    def _on_search_enter(self, _event: object) -> None:
-        term = self._search_var.get().strip()
+    def _on_search_enter(self, _event: object = None) -> None:
+        term = normalize_scan(self._search_var.get())
         if not term:
             return
         # Exact barcode -> add immediately (scanner-style).
         with transaction() as conn:
             exact = products_repo.get_by_barcode(conn, term)
-        if exact and exact.is_active:
-            self._add_product(exact.id)
+        if exact is not None:
             self._search_var.set("")
             self._clear_results()
+            if exact.is_active:
+                self._add_product(exact.id)
+            else:
+                self._notify(f'"{exact.name}" is discontinued and cannot be sold.')
             return
-        self._run_search()
+        self._run_search(term)
 
-    def _run_search(self) -> None:
-        term = self._search_var.get().strip()
+    def _run_search(self, term: str | None = None) -> None:
+        if term is None:
+            term = normalize_scan(self._search_var.get())
         self._search_msg.config(text="")
         with transaction() as conn:
             matches = products_repo.search(conn, term)
@@ -178,7 +214,15 @@ class CheckoutScreen(ttk.Frame):
                 ),
             )
         if not matches:
-            self._search_msg.config(text=f'No product found for "{term}".')
+            if looks_like_barcode(term):
+                self._notify(f"Barcode {term} is not in the catalog.")
+            else:
+                self._notify(f'No product found for "{term}".')
+
+    def _notify(self, message: str) -> None:
+        """Show a checkout message and beep (SRS FR-3.2)."""
+        self._search_msg.config(text=message)
+        self.bell()
 
     def _add_selected_result(self, _event: object) -> None:
         selection = self._results_tree.selection()
@@ -192,6 +236,7 @@ class CheckoutScreen(ttk.Frame):
         except CheckoutError as exc:
             messagebox.showerror("Cannot add item", str(exc), parent=self)
             return
+        self._search_msg.config(text="")
         self._refresh_cart()
         self._search_entry.focus_set()
 

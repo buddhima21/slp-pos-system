@@ -65,6 +65,14 @@ def test_add_by_barcode_unknown(conn):
         checkout_service.add_by_barcode(conn, cart, "does-not-exist")
 
 
+def test_add_by_barcode_tolerates_scanner_whitespace(conn):
+    cola = _product(conn, barcode="4001234567890", name="Cola", price=120.0, stock=10)
+    cart = Cart()
+    line = checkout_service.add_by_barcode(conn, cart, "  4001234567890 \n")
+    assert line.product_id == cola.id
+    assert cart.item_count == 1
+
+
 # --- change / tender -----------------------------------------------------
 
 
