@@ -13,6 +13,13 @@ from pathlib import Path
 STORE_NAME = "SLP Supermarket"
 CURRENCY_SYMBOL = "Rs. "  # shown on screens and receipts
 
+# Printed on the receipt header/footer. The owner edits these before go-live.
+STORE_ADDRESS = "123 Main Street, Colombo"
+STORE_PHONE = "011-234-5678"
+RECEIPT_WIDTH = 32          # characters; 32 suits a 58 mm thermal roll, 42 an 80 mm
+RECEIPT_FOOTER = "Thank you for shopping with us!"
+RECEIPT_PRINTING_ENABLED = True  # set False to only save receipts to file
+
 # Quick-tender buttons on the checkout payment panel (largest first is fine).
 CASH_DENOMINATIONS = (50, 100, 500, 1000, 5000)
 
@@ -34,6 +41,7 @@ def _app_base_dir() -> Path:
 APP_BASE_DIR: Path = _app_base_dir()
 DATA_DIR: Path = APP_BASE_DIR / "data_store"
 BACKUP_DIR: Path = APP_BASE_DIR / "backups"
+RECEIPT_DIR: Path = DATA_DIR / "receipts"
 DB_PATH: Path = DATA_DIR / "slp_pos.db"
 
 
@@ -41,3 +49,4 @@ def ensure_directories() -> None:
     """Create the runtime folders if they do not exist yet."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    RECEIPT_DIR.mkdir(parents=True, exist_ok=True)

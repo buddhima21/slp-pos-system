@@ -127,3 +127,14 @@ def get_sale_items(conn: sqlite3.Connection, sale_id: int) -> list[SaleItemRow]:
 
 def count_sales(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0])
+
+
+def list_recent_sales(conn: sqlite3.Connection, limit: int = 50) -> list[SaleRow]:
+    """Most recent sales first - used by the reprint picker (SRS FR-5.2)."""
+    rows = conn.execute(
+        "SELECT id, sale_datetime, cashier_id, total_amount, payment_method, "
+        "       amount_tendered, change_given "
+        "FROM sales ORDER BY id DESC LIMIT ?",
+        (limit,),
+    )
+    return [SaleRow.from_row(r) for r in rows]

@@ -16,10 +16,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from slp_pos import config
-from slp_pos.data import products_repo
+from slp_pos.data import products_repo, sales_repo
 from slp_pos.db.connection import transaction
 from slp_pos.hardware.scanner import looks_like_barcode, normalize_scan
-from slp_pos.services import checkout_service
+from slp_pos.services import checkout_service, receipt_service
 from slp_pos.services.checkout_service import Cart, CheckoutError
 
 _MONEY = config.CURRENCY_SYMBOL
@@ -165,6 +165,10 @@ class CheckoutScreen(ttk.Frame):
         )
         self._complete_btn.grid(row=7, column=0, sticky="ew", ipady=8)
         self.winfo_toplevel().bind("<F12>", lambda _e: self._complete_sale())
+
+        ttk.Button(
+            right, text="Reprint a receipt...", command=self._open_reprint_dialog
+        ).grid(row=8, column=0, sticky="ew", pady=(10, 0))
 
     def _build_quick_cash(self, parent: tk.Misc, row: int) -> None:
         grid = ttk.Frame(parent)
@@ -388,13 +392,16 @@ class CheckoutScreen(ttk.Frame):
             self._tendered_entry.focus_set()
             return
 
+        # The sale is committed. Printing must never undo or block it (SRS 9.1).
+        receipt_note = self._issue_receipt(sale.sale_id)
+
         messagebox.showinfo(
             "Sale complete",
             f"Sale #{sale.sale_id}\n"
             f"Total: {_money(sale.total)}\n"
             f"Paid: {_money(sale.amount_tendered)} ({sale.payment_method})\n"
             f"Change: {_money(sale.change_given)}\n\n"
-            "(Receipt printing is added in Phase 7.)",
+            f"{receipt_note}",
             parent=self,
         )
         self._tendered_var.set("")
@@ -402,3 +409,100 @@ class CheckoutScreen(ttk.Frame):
         self._search_var.set("")
         self._refresh_cart()
         self._search_entry.focus_set()
+
+    def _issue_receipt(self, sale_id: int) -> str:
+        """Save + print the receipt. Returns a line to show the cashier."""
+        try:
+            with transaction() as conn:
+                result = receipt_service.issue_receipt(conn, sale_id)
+        except Exception as exc:  # never let a receipt problem escape
+            return f"WARNING: receipt could not be produced ({exc})."
+        if result.printed:
+            return "Receipt printed."
+        if result.warning:
+            return f"PRINTER PROBLEM: {result.warning}"
+        return f"Receipt saved to {result.saved_path}."
+
+    # --- reprint (SRS FR-5.2) -----------------------------------------
+
+    def _open_reprint_dialog(self) -> None:
+        ReprintDialog(self.winfo_toplevel())
+
+
+class ReprintDialog(tk.Toplevel):
+    """Pick a recent sale and reprint its receipt (SRS FR-5.2)."""
+
+    def __init__(self, master: tk.Misc) -> None:
+        super().__init__(master)
+        self.title("Reprint a receipt")
+        self.geometry("460x360")
+        self.transient(master)
+        self.grab_set()
+
+        ttk.Label(
+            self, text="Select a sale and click Reprint:", padding=10
+        ).pack(anchor="w")
+
+        wrapper = ttk.Frame(self, padding=(10, 0))
+        wrapper.pack(fill="both", expand=True)
+        self._tree = ttk.Treeview(
+            wrapper,
+            columns=("id", "when", "total"),
+            show="headings",
+            selectmode="browse",
+        )
+        for key, heading, width, anchor in (
+            ("id", "Sale #", 70, "w"),
+            ("when", "Date / time", 220, "w"),
+            ("total", "Total", 110, "e"),
+        ):
+            self._tree.heading(key, text=heading)
+            self._tree.column(key, width=width, anchor=anchor)
+        self._tree.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(wrapper, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self._tree.bind("<Double-1>", lambda _e: self._reprint())
+
+        buttons = ttk.Frame(self, padding=10)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Reprint", command=self._reprint).pack(side="right")
+        ttk.Button(buttons, text="Close", command=self.destroy).pack(side="right", padx=6)
+
+        self._load()
+
+    def _load(self) -> None:
+        with transaction() as conn:
+            sales = sales_repo.list_recent_sales(conn, limit=100)
+        for sale in sales:
+            self._tree.insert(
+                "",
+                "end",
+                iid=str(sale.id),
+                values=(
+                    f"{sale.id:06d}",
+                    sale.sale_datetime.replace("T", " "),
+                    _money(sale.total_amount),
+                ),
+            )
+
+    def _reprint(self) -> None:
+        selection = self._tree.selection()
+        if not selection:
+            messagebox.showinfo("Reprint", "Select a sale first.", parent=self)
+            return
+        sale_id = int(selection[0])
+        try:
+            with transaction() as conn:
+                result = receipt_service.reprint_receipt(conn, sale_id)
+        except Exception as exc:
+            messagebox.showerror("Reprint failed", str(exc), parent=self)
+            return
+        if result.printed:
+            messagebox.showinfo("Reprint", f"Receipt #{sale_id:06d} sent to the printer.", parent=self)
+        else:
+            messagebox.showwarning(
+                "Reprint",
+                result.warning or f"Saved to {result.saved_path} (printing is disabled).",
+                parent=self,
+            )

@@ -43,6 +43,14 @@ First run creates `data_store/slp_pos.db` and a default admin account:
 python -m slp_pos.db.seed
 ```
 
+## Receipts
+
+Every completed sale is rendered as a plain-text receipt, saved to
+`data_store/receipts/receipt-NNNNNN.txt`, and sent to the default Windows
+printer. If the printer is unavailable the sale still completes and the cashier
+is warned. Store name / address / phone / paper width are set in
+`slp_pos/config.py`; set `RECEIPT_PRINTING_ENABLED = False` to save only.
+
 ## Tests
 
 ```bash
@@ -59,7 +67,7 @@ Following the SRS development plan (Section 8):
 - [x] Phase 4 — Checkout screen (typed search, cart, cash + change, atomic sale)
 - [x] Phase 5 — Barcode scanner (wedge input, focus capture, unknown-code alert)
 - [x] Phase 6 — Payment & change (quick-cash buttons, live change/shortfall)
-- [ ] Phase 7 — Receipt printing
+- [x] Phase 7 — Receipt printing (plain text, auto-save + print, reprint dialog)
 - [ ] Phase 8 — Login/roles, reports, low-stock, backup
 - [ ] Phase 9 — PyInstaller packaging
 - [ ] Phase 10 — Parallel run
